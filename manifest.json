@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "WhatsMD",
+  "version": "1.0.0",
+  "description": "Exporta conversa do WhatsApp Web para .md com imagens embutidas em base64",
+  "permissions": ["activeTab", "downloads", "scripting"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "WhatsMD — Exportar conversa",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
