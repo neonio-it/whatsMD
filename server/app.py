@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-MODEL_NAME = os.environ.get("ASR_MODEL", "small")
+MODEL_NAME = os.environ.get("ASR_MODEL", "large-v3-turbo")
 DOWNLOAD_ROOT = os.environ.get("ASR_MODEL_PATH", "/root/.cache/whisper")
 
 _model = None
