@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "WhatsMD",
-  "version": "1.1.0",
-  "description": "Exporta a conversa aberta no WhatsApp Web para Markdown (.md) com as imagens salvas em pasta",
-  "permissions": ["activeTab", "downloads", "scripting"],
-  "host_permissions": ["https://web.whatsapp.com/*"],
+  "version": "1.2.0",
+  "description": "Exporta a conversa aberta no WhatsApp Web para Markdown (.md), salvando imagens e áudios em pasta e transcrevendo os áudios (voz→texto) via Whisper self-hosted",
+  "permissions": ["activeTab", "downloads", "scripting", "storage"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://pczin-coolify.tailfff79d.ts.net/*",
+    "http://100.74.40.75/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

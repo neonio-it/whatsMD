@@ -1,8 +1,33 @@
 importScripts('utils/md_builder.js');
 
+const DEFAULT_SETTINGS = {
+  sttEnabled: true,
+  sttEndpoint: 'http://100.74.40.75:9000',
+  sttLanguage: 'pt',
+};
+
+function getSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(DEFAULT_SETTINGS, (s) => resolve({ ...DEFAULT_SETTINGS, ...s }));
+  });
+}
+
 function mimeToExt(mimeType) {
-  const map = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-  return map[mimeType] || 'jpg';
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'audio/ogg': 'ogg',
+    'audio/opus': 'ogg',
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/aac': 'aac',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/webm': 'webm',
+  };
+  return map[mimeType] || 'bin';
 }
 
 function dataUrlMime(dataUrl) {
@@ -39,6 +64,24 @@ function downloadDataUrl(dataUrl, filename) {
   });
 }
 
+// Envia o áudio para o Whisper self-hosted (openai-whisper-asr-webservice).
+// Endpoint: POST {base}/asr?task=transcribe&language=pt&output=txt&encode=true
+// campo multipart: audio_file. Resposta: text/plain com a transcrição.
+async function transcribe(dataUrl, settings) {
+  const blob = await (await fetch(dataUrl)).blob();
+  const ext = mimeToExt(dataUrlMime(dataUrl));
+  const form = new FormData();
+  form.append('audio_file', blob, `audio.${ext}`);
+
+  const base = settings.sttEndpoint.replace(/\/+$/, '');
+  const lang = settings.sttLanguage || 'pt';
+  const url = `${base}/asr?task=transcribe&language=${encodeURIComponent(lang)}&output=txt&encode=true`;
+
+  const resp = await fetch(url, { method: 'POST', body: form });
+  if (!resp.ok) throw new Error(`STT HTTP ${resp.status}`);
+  return (await resp.text()).trim();
+}
+
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'export') {
     handleExport(message.data).catch((err) => {
@@ -58,9 +101,11 @@ function notifyPopup(state, extra = {}) {
 async function handleExport({ contactName, messages }) {
   notifyPopup('loading');
 
+  const settings = await getSettings();
   const exportDate = new Date();
   const folderName = `WhatsMD/${safeFilename(contactName)}_${formatDateForFolder(exportDate)}`;
 
+  // Imagens
   let imageCounter = 0;
   for (const msg of messages) {
     if (!msg.imageDataUrl) continue;
@@ -69,6 +114,33 @@ async function handleExport({ contactName, messages }) {
     msg.imageFilename = `img_${String(imageCounter).padStart(3, '0')}.${ext}`;
     await downloadDataUrl(msg.imageDataUrl, `${folderName}/imagens/${msg.imageFilename}`);
     delete msg.imageDataUrl;
+  }
+
+  // Áudios: salva o arquivo e (se habilitado) transcreve.
+  // Sequencial de propósito — o pczin é CPU-only e divide núcleos com o servidor.
+  const audioMsgs = messages.filter((m) => m.audioDataUrl);
+  let audioCounter = 0;
+  let done = 0;
+  for (const msg of messages) {
+    if (!msg.audioDataUrl) continue;
+    audioCounter++;
+    const ext = mimeToExt(dataUrlMime(msg.audioDataUrl));
+    msg.audioFilename = `audio_${String(audioCounter).padStart(3, '0')}.${ext}`;
+    await downloadDataUrl(msg.audioDataUrl, `${folderName}/audios/${msg.audioFilename}`);
+
+    if (settings.sttEnabled) {
+      done++;
+      notifyPopup('loading', { message: `Transcrevendo áudio ${done}/${audioMsgs.length}...` });
+      try {
+        const t = await transcribe(msg.audioDataUrl, settings);
+        msg.transcript = t || '';
+        if (!t) msg.transcriptError = 'vazio';
+      } catch (err) {
+        console.error('Transcrição falhou:', err);
+        msg.transcriptError = err.message;
+      }
+    }
+    delete msg.audioDataUrl;
   }
 
   const exportedAt = formatDate(exportDate);

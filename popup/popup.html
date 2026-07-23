@@ -17,9 +17,31 @@
 
     <button id="exportBtn">Exportar conversa</button>
 
-    <p class="hint">Só as mensagens já carregadas na tela são exportadas — role a conversa para cima para incluir mais.</p>
+    <p class="hint">Só as mensagens já carregadas na tela são exportadas — role a conversa para cima para incluir mais. Reproduza os áudios antes de exportar para garantir a transcrição.</p>
 
     <div id="status" class="status hidden"></div>
+
+    <button id="configToggle" class="link-btn">⚙️ Transcrição de áudio</button>
+
+    <div id="config" class="config hidden">
+      <label class="row">
+        <input type="checkbox" id="sttEnabled" />
+        <span>Transcrever áudios (voz→texto)</span>
+      </label>
+
+      <label class="field">
+        <span>Endpoint do Whisper</span>
+        <input type="text" id="sttEndpoint" placeholder="http://100.74.40.75:9000" />
+      </label>
+
+      <label class="field">
+        <span>Idioma</span>
+        <input type="text" id="sttLanguage" placeholder="pt" />
+      </label>
+
+      <button id="testBtn" class="secondary">Testar conexão</button>
+      <div id="testResult" class="status hidden"></div>
+    </div>
   </div>
 
   <script src="popup.js"></script>

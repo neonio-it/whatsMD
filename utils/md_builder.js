@@ -14,6 +14,17 @@ function formatMessage(msg) {
     lines.push('*[mídia não exportada]*');
   }
 
+  if (msg.audioFilename) {
+    lines.push(`🔊 [${msg.audioFilename}](./audios/${msg.audioFilename})`);
+    if (msg.transcript) {
+      lines.push(`> 🎙️ ${msg.transcript.replace(/\n+/g, ' ').trim()}`);
+    } else if (msg.transcriptError) {
+      lines.push('> 🎙️ *[transcrição indisponível]*');
+    }
+  } else if (msg.hadAudio) {
+    lines.push('*[áudio não carregado — reproduza na conversa antes de exportar]*');
+  }
+
   return lines.join('\n');
 }
 

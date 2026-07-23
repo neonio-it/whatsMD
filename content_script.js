@@ -43,11 +43,27 @@
       .catch(() => null);
   }
 
+  // Um áudio/PTT só tem o blob carregado depois que o WhatsApp baixa a mídia
+  // (normalmente já vem carregado ao entrar na conversa). Se o <audio> ainda
+  // não tiver src blob, marcamos hadAudio mas sem dados — o usuário reproduz e
+  // reexporta. O controle de play existe mesmo antes do blob, então serve para
+  // detectar que a mensagem É um áudio.
+  function findAudio(el) {
+    const audioEl = el.querySelector('audio[src^="blob:"]');
+    const isVoice =
+      audioEl !== null ||
+      el.querySelector(
+        '[data-icon="audio-play"], [data-icon="ptt-status"], [data-icon="audio-download"], button[aria-label*="udio"], button[aria-label*="oice"]'
+      ) !== null;
+    return { audioEl, isVoice };
+  }
+
   const messageEls = conversationPanel.querySelectorAll('[data-id]');
   const messages = await Promise.all(
     Array.from(messageEls).map(async (el) => {
       const textEl = el.querySelector('.copyable-text');
       const imgEl = el.querySelector('img[src^="blob:"], img[src*="mmg.whatsapp.net"]');
+      const { audioEl, isVoice } = findAudio(el);
 
       const isOutgoing =
         el.classList.contains('message-out') || el.querySelector('.message-out') !== null;
@@ -69,9 +85,12 @@
       const hadImage = imgEl !== null;
       const imageDataUrl = imgEl ? await blobUrlToDataUrl(imgEl.src) : null;
 
-      if (!text && !hadImage) return null;
+      const hadAudio = isVoice;
+      const audioDataUrl = audioEl ? await blobUrlToDataUrl(audioEl.src) : null;
 
-      return { sender, time, date, text, hadImage, imageDataUrl };
+      if (!text && !hadImage && !hadAudio) return null;
+
+      return { sender, time, date, text, hadImage, imageDataUrl, hadAudio, audioDataUrl };
     })
   );
 
