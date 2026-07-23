@@ -68,6 +68,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.hint {
+  font-size: 11px;
+  color: #667781;
+  line-height: 1.4;
+}
+
 .status {
   font-size: 12px;
   padding: 8px 10px;

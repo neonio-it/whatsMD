@@ -1,21 +1,17 @@
-function toImageTag(filename, index) {
-  const padded = String(index + 1).padStart(3, '0');
-  return `![img_${padded}](./imagens/${filename})`;
-}
-
-function formatMessage(msg, index) {
+function formatMessage(msg) {
   const lines = [];
 
-  lines.push(`**${msg.sender}** · ${msg.time}`);
+  const meta = [msg.time, msg.date].filter(Boolean).join(' · ');
+  lines.push(meta ? `**${msg.sender}** · ${meta}` : `**${msg.sender}**`);
 
   if (msg.text) {
     lines.push(msg.text);
   }
 
   if (msg.imageFilename) {
-    lines.push(toImageTag(msg.imageFilename, index));
+    lines.push(`![${msg.imageFilename}](./imagens/${msg.imageFilename})`);
   } else if (msg.hadImage) {
-    lines.push('![mídia indisponível]()');
+    lines.push('*[mídia não exportada]*');
   }
 
   return lines.join('\n');
@@ -31,9 +27,10 @@ function buildMarkdown(messages, metadata) {
     '',
     '---',
     '',
+    '',
   ].join('\n');
 
-  const body = messages.map((msg, i) => formatMessage(msg, i)).join('\n\n');
+  const body = messages.map((msg) => formatMessage(msg)).join('\n\n');
 
   return header + body;
 }

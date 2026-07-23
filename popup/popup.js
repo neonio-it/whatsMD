@@ -24,7 +24,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 btn.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  if (!tab.url || !tab.url.includes('web.whatsapp.com')) {
+  if (!tab || !tab.url || !tab.url.includes('web.whatsapp.com')) {
     setStatus('error', 'Abra o WhatsApp Web primeiro.');
     return;
   }
@@ -32,8 +32,13 @@ btn.addEventListener('click', async () => {
   btn.disabled = true;
   setStatus('loading', 'Capturando conversa...');
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ['content_script.js'],
-  });
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content_script.js'],
+    });
+  } catch {
+    btn.disabled = false;
+    setStatus('error', 'Não foi possível capturar. Recarregue o WhatsApp Web e tente de novo.');
+  }
 });

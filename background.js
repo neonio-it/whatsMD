@@ -1,47 +1,13 @@
 importScripts('utils/md_builder.js');
 
-const BATCH_SIZE = 50;
-
 function mimeToExt(mimeType) {
   const map = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
   return map[mimeType] || 'jpg';
 }
 
-async function fetchBlob(url) {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const blob = await response.blob();
-    return blob;
-  } catch {
-    return null;
-  }
-}
-
-async function processMessages(messages) {
-  const result = [];
-  let imageCounter = 0;
-
-  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
-    const batch = messages.slice(i, i + BATCH_SIZE);
-    const processed = await Promise.all(
-      batch.map(async (msg) => {
-        if (!msg.imageUrl) return msg;
-        const blob = await fetchBlob(msg.imageUrl);
-        if (!blob) {
-          return { ...msg, hadImage: true, imageUrl: undefined };
-        }
-        imageCounter++;
-        const ext = mimeToExt(blob.type);
-        const padded = String(imageCounter).padStart(3, '0');
-        const filename = `img_${padded}.${ext}`;
-        return { ...msg, blob, imageFilename: filename, hadImage: true, imageUrl: undefined };
-      })
-    );
-    result.push(...processed);
-  }
-
-  return result;
+function dataUrlMime(dataUrl) {
+  const match = dataUrl.match(/^data:([^;,]+)/);
+  return match ? match[1] : '';
 }
 
 function formatDate(date) {
@@ -60,18 +26,8 @@ function formatDateForFolder(date) {
 }
 
 function safeFilename(name) {
-  return name.replace(/[^a-zA-Z0-9À-ɏ\s-]/g, '').trim().replace(/\s+/g, '-');
-}
-
-async function blobToDataUrl(blob) {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-  }
-  const mime = blob.type || 'application/octet-stream';
-  return `data:${mime};base64,${btoa(binary)}`;
+  const clean = name.replace(/[^a-zA-Z0-9À-ɏ\s-]/g, '').trim().replace(/\s+/g, '-');
+  return clean || 'Conversa';
 }
 
 function downloadDataUrl(dataUrl, filename) {
@@ -85,10 +41,13 @@ function downloadDataUrl(dataUrl, filename) {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'export') {
-    handleExport(message.data).catch(console.error);
+    handleExport(message.data).catch((err) => {
+      console.error(err);
+      notifyPopup('error', { message: `Falha ao exportar: ${err.message}` });
+    });
   }
   if (message.action === 'error') {
-    notifyPopup('error', message.message);
+    notifyPopup('error', { message: message.message });
   }
 });
 
@@ -101,18 +60,19 @@ async function handleExport({ contactName, messages }) {
 
   const exportDate = new Date();
   const folderName = `WhatsMD/${safeFilename(contactName)}_${formatDateForFolder(exportDate)}`;
-  const processed = await processMessages(messages);
 
-  for (const msg of processed) {
-    if (msg.blob && msg.imageFilename) {
-      const dataUrl = await blobToDataUrl(msg.blob);
-      await downloadDataUrl(dataUrl, `${folderName}/imagens/${msg.imageFilename}`);
-      delete msg.blob;
-    }
+  let imageCounter = 0;
+  for (const msg of messages) {
+    if (!msg.imageDataUrl) continue;
+    imageCounter++;
+    const ext = mimeToExt(dataUrlMime(msg.imageDataUrl));
+    msg.imageFilename = `img_${String(imageCounter).padStart(3, '0')}.${ext}`;
+    await downloadDataUrl(msg.imageDataUrl, `${folderName}/imagens/${msg.imageFilename}`);
+    delete msg.imageDataUrl;
   }
 
   const exportedAt = formatDate(exportDate);
-  const md = buildMarkdown(processed, { contactName, exportedAt, total: processed.length });
+  const md = buildMarkdown(messages, { contactName, exportedAt, total: messages.length });
 
   const mdDataUrl = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(md);
   await downloadDataUrl(mdDataUrl, `${folderName}/conversa.md`);
