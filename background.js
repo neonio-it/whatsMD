@@ -67,7 +67,10 @@ function downloadDataUrl(dataUrl, filename) {
 // Envia o áudio para o Whisper self-hosted (openai-whisper-asr-webservice).
 // Endpoint: POST {base}/asr?task=transcribe&language=pt&output=txt&encode=true
 // campo multipart: audio_file. Resposta: text/plain com a transcrição.
-async function transcribe(dataUrl, settings, timeoutMs) {
+// Transcreve via streaming: o serviço emite uma linha NDJSON por segmento
+// ({progress, text}) → progresso REAL (segundos de áudio já transcritos ÷ total).
+// onProgress(frac 0..1) é chamado a cada segmento. Retorna o texto final.
+async function transcribeStream(dataUrl, settings, onProgress, timeoutMs) {
   const blob = await (await fetch(dataUrl)).blob();
   const ext = mimeToExt(dataUrlMime(dataUrl));
   const form = new FormData();
@@ -75,16 +78,40 @@ async function transcribe(dataUrl, settings, timeoutMs) {
 
   const base = settings.sttEndpoint.replace(/\/+$/, '');
   const lang = settings.sttLanguage || 'pt';
-  // vad_filter pula silêncios da mensagem de voz → mais rápido e sem repetição alucinada
-  const url = `${base}/asr?task=transcribe&language=${encodeURIComponent(lang)}&output=txt&encode=true&vad_filter=true`;
+  const url = `${base}/transcribe-stream?language=${encodeURIComponent(lang)}`;
 
-  // timeout por áudio: um download/inferência travado nunca mais congela a exportação inteira
+  // timeout por áudio: uma inferência travada nunca mais congela a exportação
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const resp = await fetch(url, { method: 'POST', body: form, signal: ctrl.signal });
-    if (!resp.ok) throw new Error(`STT HTTP ${resp.status}`);
-    return (await resp.text()).trim();
+    if (!resp.ok || !resp.body) throw new Error(`STT HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let finalText = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (obj.error) throw new Error(obj.error);
+        if (typeof obj.progress === 'number') onProgress(obj.progress);
+        if (typeof obj.text === 'string') finalText = obj.text;
+      }
+    }
+    return finalText.trim();
   } finally {
     clearTimeout(timer);
   }
@@ -100,18 +127,22 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'error') {
     notifyPopup('error', { message: message.message });
   }
-  // progresso vindo do relay ("Baixando mídia x/y...") — persiste também
-  if (message.action === 'status' && message.state === 'loading') {
-    chrome.storage.local.set({
-      lastStatus: { state: 'loading', message: message.message, t: Date.now() },
-    });
+  // progresso vindo do relay (fase de download) — persiste também
+  if (message.action === 'status' && message.state === 'loading' && message.phase) {
+    const { action, ...rest } = message;
+    persistStatus(rest);
   }
 });
 
-function notifyPopup(state, extra = {}) {
-  chrome.runtime.sendMessage({ action: 'status', state, ...extra }).catch(() => {});
+function persistStatus(obj) {
   // persiste pro popup poder mostrar o andamento mesmo se for fechado e reaberto
-  chrome.storage.local.set({ lastStatus: { state, ...extra, t: Date.now() } });
+  chrome.storage.local.set({ lastStatus: { ...obj, t: Date.now() } });
+}
+
+function notifyPopup(state, extra = {}) {
+  const obj = { state, ...extra };
+  chrome.runtime.sendMessage({ action: 'status', ...obj }).catch(() => {});
+  persistStatus(obj);
 }
 
 async function handleExport({ contactName, messages }) {
@@ -134,9 +165,13 @@ async function handleExport({ contactName, messages }) {
 
   // Áudios: salva o arquivo e (se habilitado) transcreve.
   // Sequencial de propósito — o pczin é CPU-only e divide núcleos com o servidor.
+  // A barra de progresso é pesada pela DURAÇÃO real de cada áudio (via audioSecs),
+  // e dentro de cada áudio anda com o progresso REAL vindo do streaming.
   const audioMsgs = messages.filter((m) => m.audioDataUrl);
+  const totalSecs = audioMsgs.reduce((sum, m) => sum + (m.audioSecs || 30), 0) || 1;
   let audioCounter = 0;
   let done = 0;
+  let completedSecs = 0;
   for (const msg of messages) {
     if (!msg.audioDataUrl) continue;
     audioCounter++;
@@ -146,17 +181,22 @@ async function handleExport({ contactName, messages }) {
 
     if (settings.sttEnabled) {
       done++;
-      notifyPopup('loading', {
-        message: `Transcrevendo áudio ${done}/${audioMsgs.length} — áudios longos levam 1-2 min, aguarde...`,
-      });
+      const curSecs = msg.audioSecs || 30;
+      const report = (segFrac) => {
+        const overall = Math.min(1, (completedSecs + curSecs * segFrac) / totalSecs);
+        notifyPopup('loading', { phase: 'stt', progress: overall, done, total: audioMsgs.length });
+      };
+      report(0);
       try {
-        const t = await transcribe(msg.audioDataUrl, settings, 6 * 60 * 1000);
+        const t = await transcribeStream(msg.audioDataUrl, settings, report, 8 * 60 * 1000);
         msg.transcript = t || '';
         if (!t) msg.transcriptError = 'vazio';
       } catch (err) {
         console.error('Transcrição falhou:', err);
         msg.transcriptError = err.name === 'AbortError' ? 'tempo esgotado (áudio muito longo)' : err.message;
       }
+      completedSecs += curSecs;
+      report(0); // completedSecs já inclui este áudio → fecha a fatia dele
     }
     delete msg.audioDataUrl;
   }

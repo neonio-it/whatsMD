@@ -15,6 +15,42 @@ function setStatus(state, message) {
   statusEl.textContent = message;
 }
 
+function setBar(frac) {
+  $('progress').classList.remove('hidden');
+  $('progressBar').style.width = `${Math.round(Math.min(1, Math.max(0, frac)) * 100)}%`;
+}
+
+function hideBar() {
+  $('progress').classList.add('hidden');
+}
+
+// render unificado do progresso — a fase de download ocupa os primeiros 10%,
+// a transcrição (o trabalho pesado, com progresso real) os 90% restantes.
+function applyStatus(msg) {
+  if (msg.state === 'loading') {
+    btn.disabled = true;
+    let fill = 0;
+    let label = msg.message || 'Exportando...';
+    if (msg.phase === 'download') {
+      fill = 0.1 * (msg.total ? msg.done / msg.total : 0);
+      label = `Baixando mídia ${msg.done}/${msg.total}`;
+    } else if (msg.phase === 'stt') {
+      fill = 0.1 + 0.9 * (msg.progress || 0);
+      label = `Transcrevendo áudio ${msg.done}/${msg.total} · ${Math.round((msg.progress || 0) * 100)}%`;
+    }
+    setBar(fill);
+    setStatus('loading', label);
+  } else if (msg.state === 'done') {
+    btn.disabled = false;
+    setBar(1);
+    setStatus('done', `Salvo: ${msg.filename}`);
+  } else if (msg.state === 'error') {
+    btn.disabled = false;
+    hideBar();
+    setStatus('error', msg.message);
+  }
+}
+
 // ---- Configuração (chrome.storage.local) ----
 function loadSettings() {
   chrome.storage.local.get(DEFAULT_SETTINGS, (s) => {
@@ -48,11 +84,12 @@ $('testBtn').addEventListener('click', async () => {
   result.className = 'status loading';
   result.textContent = 'Testando...';
   try {
-    // /docs é a UI Swagger do whisper-asr-webservice — resposta 200 = serviço no ar
-    const resp = await fetch(`${base}/docs`, { method: 'GET' });
+    // /health responde {ok, model} — 200 = serviço de transcrição no ar
+    const resp = await fetch(`${base}/health`, { method: 'GET' });
     if (resp.ok) {
+      const info = await resp.json().catch(() => ({}));
       result.className = 'status done';
-      result.textContent = '✓ Conectado ao Whisper';
+      result.textContent = info.model ? `✓ Conectado (modelo ${info.model})` : '✓ Conectado ao Whisper';
     } else {
       result.className = 'status error';
       result.textContent = `Respondeu HTTP ${resp.status}`;
@@ -70,30 +107,12 @@ chrome.storage.local.get({ lastStatus: null }, ({ lastStatus }) => {
   if (!lastStatus) return;
   const age = Date.now() - (lastStatus.t || 0);
   if (age > 15 * 60 * 1000) return; // status velho não interessa
-  if (lastStatus.state === 'loading') {
-    btn.disabled = true;
-    setStatus('loading', lastStatus.message || 'Exportando...');
-  } else if (lastStatus.state === 'done') {
-    setStatus('done', `Salvo: ${lastStatus.filename}`);
-  } else if (lastStatus.state === 'error') {
-    setStatus('error', lastStatus.message);
-  }
+  applyStatus(lastStatus);
 });
 
 // ---- Status vindo do background ----
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action === 'status') {
-    if (msg.state === 'loading') {
-      btn.disabled = true;
-      setStatus('loading', msg.message || 'Exportando...');
-    } else if (msg.state === 'done') {
-      btn.disabled = false;
-      setStatus('done', `Salvo: ${msg.filename}`);
-    } else if (msg.state === 'error') {
-      btn.disabled = false;
-      setStatus('error', msg.message);
-    }
-  }
+  if (msg.action === 'status') applyStatus(msg);
 });
 
 btn.addEventListener('click', async () => {

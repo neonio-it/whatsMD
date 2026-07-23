@@ -103,6 +103,7 @@
         imageDataUrl: null,
         hadAudio: false,
         audioDataUrl: null,
+        audioSecs: 0,
       };
 
       if (m.type === 'chat') {
@@ -112,6 +113,7 @@
         msg.text = m.caption || '';
       } else if (m.type === 'ptt' || m.type === 'audio') {
         msg.hadAudio = true;
+        msg.audioSecs = Math.round(m.duration || 0);
       } else if (m.type === 'video') {
         msg.text = [m.caption, '*[vídeo não exportado]*'].filter(Boolean).join('\n');
       } else if (m.type === 'document') {
@@ -126,7 +128,7 @@
 
       if (msg.hadImage || msg.hadAudio) {
         mediaDone++;
-        post('progress', { message: `Baixando mídia ${mediaDone}/${mediaTotal}...` });
+        post('progress', { phase: 'download', done: mediaDone, total: mediaTotal });
         try {
           const blob = await withTimeout(WPP.chat.downloadMedia(id), 30000, 'download');
           const dataUrl = blob ? await blobToDataUrl(blob) : null;

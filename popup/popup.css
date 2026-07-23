@@ -85,6 +85,25 @@ button:disabled {
   display: none;
 }
 
+.progress {
+  height: 7px;
+  background: #2a3942;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress.hidden {
+  display: none;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: #00a884;
+  border-radius: 4px;
+  transition: width 0.25s ease;
+}
+
 .status.loading {
   background: #2a3942;
   color: #8696a0;

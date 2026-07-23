@@ -18,6 +18,12 @@ window.addEventListener('message', (e) => {
   } else if (kind === 'error') {
     chrome.runtime.sendMessage({ action: 'error', message: e.data.message });
   } else if (kind === 'progress') {
-    chrome.runtime.sendMessage({ action: 'status', state: 'loading', message: e.data.message });
+    chrome.runtime.sendMessage({
+      action: 'status',
+      state: 'loading',
+      phase: e.data.phase,
+      done: e.data.done,
+      total: e.data.total,
+    });
   }
 });

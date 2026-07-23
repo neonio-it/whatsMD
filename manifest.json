@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WhatsMD",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "Exporta a conversa aberta no WhatsApp Web para Markdown (.md), salvando imagens e áudios em pasta e transcrevendo os áudios (voz→texto) via Whisper self-hosted",
   "permissions": ["activeTab", "downloads", "scripting", "storage"],
   "host_permissions": [
