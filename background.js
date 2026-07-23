@@ -92,10 +92,18 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'error') {
     notifyPopup('error', { message: message.message });
   }
+  // progresso vindo do relay ("Baixando mídia x/y...") — persiste também
+  if (message.action === 'status' && message.state === 'loading') {
+    chrome.storage.local.set({
+      lastStatus: { state: 'loading', message: message.message, t: Date.now() },
+    });
+  }
 });
 
 function notifyPopup(state, extra = {}) {
   chrome.runtime.sendMessage({ action: 'status', state, ...extra }).catch(() => {});
+  // persiste pro popup poder mostrar o andamento mesmo se for fechado e reaberto
+  chrome.storage.local.set({ lastStatus: { state, ...extra, t: Date.now() } });
 }
 
 async function handleExport({ contactName, messages }) {

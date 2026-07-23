@@ -65,6 +65,21 @@ $('testBtn').addEventListener('click', async () => {
 
 loadSettings();
 
+// restaura o andamento se o popup foi fechado durante uma exportação
+chrome.storage.local.get({ lastStatus: null }, ({ lastStatus }) => {
+  if (!lastStatus) return;
+  const age = Date.now() - (lastStatus.t || 0);
+  if (age > 15 * 60 * 1000) return; // status velho não interessa
+  if (lastStatus.state === 'loading') {
+    btn.disabled = true;
+    setStatus('loading', lastStatus.message || 'Exportando...');
+  } else if (lastStatus.state === 'done') {
+    setStatus('done', `Salvo: ${lastStatus.filename}`);
+  } else if (lastStatus.state === 'error') {
+    setStatus('error', lastStatus.message);
+  }
+});
+
 // ---- Status vindo do background ----
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'status') {
