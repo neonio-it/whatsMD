@@ -10,6 +10,13 @@
     window.postMessage({ [TAG]: kind, ...payload }, window.origin);
   }
 
+  function withTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout ${label}`)), ms)),
+    ]);
+  }
+
   function blobToDataUrl(blob) {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -121,12 +128,13 @@
         mediaDone++;
         post('progress', { message: `Baixando mídia ${mediaDone}/${mediaTotal}...` });
         try {
-          const blob = await WPP.chat.downloadMedia(id);
+          const blob = await withTimeout(WPP.chat.downloadMedia(id), 30000, 'download');
           const dataUrl = blob ? await blobToDataUrl(blob) : null;
           if (msg.hadImage) msg.imageDataUrl = dataUrl;
           else msg.audioDataUrl = dataUrl;
         } catch (err) {
-          // mantém hadImage/hadAudio true sem dataUrl — o md marca como não exportada
+          // mantém hadImage/hadAudio true sem dataUrl — o md marca como não exportada,
+          // e o loop segue para a próxima mídia em vez de congelar
           console.warn('[WhatsMD] downloadMedia falhou:', id, err);
         }
       }

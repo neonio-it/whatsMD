@@ -67,7 +67,7 @@ function downloadDataUrl(dataUrl, filename) {
 // Envia o áudio para o Whisper self-hosted (openai-whisper-asr-webservice).
 // Endpoint: POST {base}/asr?task=transcribe&language=pt&output=txt&encode=true
 // campo multipart: audio_file. Resposta: text/plain com a transcrição.
-async function transcribe(dataUrl, settings) {
+async function transcribe(dataUrl, settings, timeoutMs) {
   const blob = await (await fetch(dataUrl)).blob();
   const ext = mimeToExt(dataUrlMime(dataUrl));
   const form = new FormData();
@@ -75,11 +75,19 @@ async function transcribe(dataUrl, settings) {
 
   const base = settings.sttEndpoint.replace(/\/+$/, '');
   const lang = settings.sttLanguage || 'pt';
-  const url = `${base}/asr?task=transcribe&language=${encodeURIComponent(lang)}&output=txt&encode=true`;
+  // vad_filter pula silêncios da mensagem de voz → mais rápido e sem repetição alucinada
+  const url = `${base}/asr?task=transcribe&language=${encodeURIComponent(lang)}&output=txt&encode=true&vad_filter=true`;
 
-  const resp = await fetch(url, { method: 'POST', body: form });
-  if (!resp.ok) throw new Error(`STT HTTP ${resp.status}`);
-  return (await resp.text()).trim();
+  // timeout por áudio: um download/inferência travado nunca mais congela a exportação inteira
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { method: 'POST', body: form, signal: ctrl.signal });
+    if (!resp.ok) throw new Error(`STT HTTP ${resp.status}`);
+    return (await resp.text()).trim();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -138,14 +146,16 @@ async function handleExport({ contactName, messages }) {
 
     if (settings.sttEnabled) {
       done++;
-      notifyPopup('loading', { message: `Transcrevendo áudio ${done}/${audioMsgs.length}...` });
+      notifyPopup('loading', {
+        message: `Transcrevendo áudio ${done}/${audioMsgs.length} — áudios longos levam 1-2 min, aguarde...`,
+      });
       try {
-        const t = await transcribe(msg.audioDataUrl, settings);
+        const t = await transcribe(msg.audioDataUrl, settings, 6 * 60 * 1000);
         msg.transcript = t || '';
         if (!t) msg.transcriptError = 'vazio';
       } catch (err) {
         console.error('Transcrição falhou:', err);
-        msg.transcriptError = err.message;
+        msg.transcriptError = err.name === 'AbortError' ? 'tempo esgotado (áudio muito longo)' : err.message;
       }
     }
     delete msg.audioDataUrl;
