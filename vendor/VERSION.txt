@@ -1,0 +1,2 @@
+﻿@wppconnect/wa-js v4.4.1 (Apache-2.0) — bundle oficial do npm registry
+https://www.npmjs.com/package/@wppconnect/wa-js

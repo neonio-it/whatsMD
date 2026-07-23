@@ -17,7 +17,7 @@
 
     <button id="exportBtn">Exportar conversa</button>
 
-    <p class="hint">Só as mensagens já carregadas na tela são exportadas — role a conversa para cima para incluir mais. Reproduza os áudios antes de exportar para garantir a transcrição.</p>
+    <p class="hint">Exporta as últimas mensagens da conversa aberta, baixando imagens e áudios automaticamente (sem precisar reproduzir).</p>
 
     <div id="status" class="status hidden"></div>
 
@@ -37,6 +37,11 @@
       <label class="field">
         <span>Idioma</span>
         <input type="text" id="sttLanguage" placeholder="pt" />
+      </label>
+
+      <label class="field">
+        <span>Nº de mensagens a exportar</span>
+        <input type="number" id="maxMessages" min="1" step="1" placeholder="100" />
       </label>
 
       <button id="testBtn" class="secondary">Testar conexão</button>

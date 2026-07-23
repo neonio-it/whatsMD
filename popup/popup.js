@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS = {
   sttEnabled: true,
   sttEndpoint: 'http://100.74.40.75:9000',
   sttLanguage: 'pt',
+  maxMessages: 100,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,7 @@ function loadSettings() {
     $('sttEnabled').checked = s.sttEnabled;
     $('sttEndpoint').value = s.sttEndpoint;
     $('sttLanguage').value = s.sttLanguage;
+    $('maxMessages').value = s.maxMessages;
   });
 }
 
@@ -28,10 +30,11 @@ function saveSettings() {
     sttEnabled: $('sttEnabled').checked,
     sttEndpoint: $('sttEndpoint').value.trim() || DEFAULT_SETTINGS.sttEndpoint,
     sttLanguage: $('sttLanguage').value.trim() || DEFAULT_SETTINGS.sttLanguage,
+    maxMessages: Math.max(1, parseInt($('maxMessages').value, 10) || DEFAULT_SETTINGS.maxMessages),
   });
 }
 
-['sttEnabled', 'sttEndpoint', 'sttLanguage'].forEach((id) =>
+['sttEnabled', 'sttEndpoint', 'sttLanguage', 'maxMessages'].forEach((id) =>
   $(id).addEventListener('change', saveSettings)
 );
 
@@ -89,13 +92,22 @@ btn.addEventListener('click', async () => {
   btn.disabled = true;
   setStatus('loading', 'Capturando conversa...');
 
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content_script.js'],
+  // caminho principal: relay/WPP (lê mensagens e baixa mídias via módulos internos)
+  chrome.storage.local.get(DEFAULT_SETTINGS, (s) => {
+    chrome.tabs.sendMessage(tab.id, { action: 'wmd-capture', maxMessages: s.maxMessages }, async (resp) => {
+      if (chrome.runtime.lastError || !resp || !resp.ok) {
+        // aba aberta antes da extensão carregar (sem relay) — fallback: scraping DOM
+        // (exporta texto/imagens; áudios não são acessíveis via DOM)
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content_script.js'],
+          });
+        } catch {
+          btn.disabled = false;
+          setStatus('error', 'Não foi possível capturar. Recarregue o WhatsApp Web (F5) e tente de novo.');
+        }
+      }
     });
-  } catch {
-    btn.disabled = false;
-    setStatus('error', 'Não foi possível capturar. Recarregue o WhatsApp Web e tente de novo.');
-  }
+  });
 });
