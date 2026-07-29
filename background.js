@@ -55,6 +55,20 @@ function safeFilename(name) {
   return clean || 'Conversa';
 }
 
+// preserva a extensão do documento e sanitiza o nome; prefixa com contador p/ evitar colisão
+function safeDocName(filename, counter) {
+  const raw = String(filename || 'arquivo');
+  const dot = raw.lastIndexOf('.');
+  const ext = dot > 0 ? raw.slice(dot + 1).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) : '';
+  const base = (dot > 0 ? raw.slice(0, dot) : raw)
+    .replace(/[^a-zA-Z0-9À-ɏ\s._-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 60) || 'arquivo';
+  const prefix = String(counter).padStart(3, '0');
+  return ext ? `${prefix}_${base}.${ext}` : `${prefix}_${base}`;
+}
+
 function downloadDataUrl(dataUrl, filename) {
   return new Promise((resolve, reject) => {
     chrome.downloads.download({ url: dataUrl, filename, saveAs: false }, (id) => {
@@ -199,6 +213,17 @@ async function handleExport({ contactName, messages }) {
       report(0); // completedSecs já inclui este áudio → fecha a fatia dele
     }
     delete msg.audioDataUrl;
+  }
+
+  // Documentos (PDF, planilha, etc.) — salva com o nome original em /arquivos
+  let docCounter = 0;
+  for (const msg of messages) {
+    if (!msg.documentDataUrl) continue;
+    docCounter++;
+    const safeName = safeDocName(msg.documentFilename, docCounter);
+    msg.documentSaved = safeName;
+    await downloadDataUrl(msg.documentDataUrl, `${folderName}/arquivos/${safeName}`);
+    delete msg.documentDataUrl;
   }
 
   const exportedAt = formatDate(exportDate);

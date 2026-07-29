@@ -82,7 +82,7 @@
     raw = raw.filter((m) => m && !SKIP_TYPES.has(m.type)).sort((a, b) => (a.t || 0) - (b.t || 0));
 
     const mediaTotal = raw.filter((m) =>
-      ['ptt', 'audio', 'image'].includes(m.type)
+      ['ptt', 'audio', 'image', 'document'].includes(m.type)
     ).length;
     let mediaDone = 0;
 
@@ -104,6 +104,9 @@
         hadAudio: false,
         audioDataUrl: null,
         audioSecs: 0,
+        hadDocument: false,
+        documentDataUrl: null,
+        documentFilename: '',
       };
 
       if (m.type === 'chat') {
@@ -117,7 +120,9 @@
       } else if (m.type === 'video') {
         msg.text = [m.caption, '*[vídeo não exportado]*'].filter(Boolean).join('\n');
       } else if (m.type === 'document') {
-        msg.text = `*[documento: ${m.filename || 'arquivo'}]*`;
+        msg.hadDocument = true;
+        msg.documentFilename = m.filename || 'arquivo';
+        msg.text = m.caption || '';
       } else if (m.type === 'sticker') {
         msg.text = '*[figurinha]*';
       } else if (m.type === 'location') {
@@ -126,22 +131,23 @@
         msg.text = m.body || m.caption || '';
       }
 
-      if (msg.hadImage || msg.hadAudio) {
+      if (msg.hadImage || msg.hadAudio || msg.hadDocument) {
         mediaDone++;
         post('progress', { phase: 'download', done: mediaDone, total: mediaTotal });
         try {
-          const blob = await withTimeout(WPP.chat.downloadMedia(id), 30000, 'download');
+          const blob = await withTimeout(WPP.chat.downloadMedia(id), 60000, 'download');
           const dataUrl = blob ? await blobToDataUrl(blob) : null;
           if (msg.hadImage) msg.imageDataUrl = dataUrl;
-          else msg.audioDataUrl = dataUrl;
+          else if (msg.hadAudio) msg.audioDataUrl = dataUrl;
+          else msg.documentDataUrl = dataUrl;
         } catch (err) {
-          // mantém hadImage/hadAudio true sem dataUrl — o md marca como não exportada,
+          // mantém had*=true sem dataUrl — o md marca como não exportado,
           // e o loop segue para a próxima mídia em vez de congelar
           console.warn('[WhatsMD] downloadMedia falhou:', id, err);
         }
       }
 
-      if (!msg.text && !msg.hadImage && !msg.hadAudio) continue;
+      if (!msg.text && !msg.hadImage && !msg.hadAudio && !msg.hadDocument) continue;
       messages.push(msg);
     }
 

@@ -25,6 +25,12 @@ function formatMessage(msg) {
     lines.push('*[áudio não carregado — reproduza na conversa antes de exportar]*');
   }
 
+  if (msg.documentSaved) {
+    lines.push(`📎 [${msg.documentFilename || msg.documentSaved}](./arquivos/${msg.documentSaved})`);
+  } else if (msg.hadDocument) {
+    lines.push(`*[documento não exportado: ${msg.documentFilename || 'arquivo'}]*`);
+  }
+
   return lines.join('\n');
 }
 
