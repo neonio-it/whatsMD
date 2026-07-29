@@ -31,6 +31,12 @@ function formatMessage(msg) {
     lines.push(`*[documento não exportado: ${msg.documentFilename || 'arquivo'}]*`);
   }
 
+  if (msg.videoFilename) {
+    lines.push(`🎬 [${msg.videoFilename}](./videos/${msg.videoFilename})`);
+  } else if (msg.hadVideo) {
+    lines.push('*[vídeo não exportado]*');
+  }
+
   return lines.join('\n');
 }
 

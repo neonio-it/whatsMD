@@ -82,7 +82,7 @@
     raw = raw.filter((m) => m && !SKIP_TYPES.has(m.type)).sort((a, b) => (a.t || 0) - (b.t || 0));
 
     const mediaTotal = raw.filter((m) =>
-      ['ptt', 'audio', 'image', 'document'].includes(m.type)
+      ['ptt', 'audio', 'image', 'document', 'video'].includes(m.type)
     ).length;
     let mediaDone = 0;
 
@@ -107,6 +107,8 @@
         hadDocument: false,
         documentDataUrl: null,
         documentFilename: '',
+        hadVideo: false,
+        videoDataUrl: null,
       };
 
       if (m.type === 'chat') {
@@ -118,7 +120,8 @@
         msg.hadAudio = true;
         msg.audioSecs = Math.round(m.duration || 0);
       } else if (m.type === 'video') {
-        msg.text = [m.caption, '*[vídeo não exportado]*'].filter(Boolean).join('\n');
+        msg.hadVideo = true;
+        msg.text = m.caption || '';
       } else if (m.type === 'document') {
         msg.hadDocument = true;
         msg.documentFilename = m.filename || 'arquivo';
@@ -131,15 +134,17 @@
         msg.text = m.body || m.caption || '';
       }
 
-      if (msg.hadImage || msg.hadAudio || msg.hadDocument) {
+      if (msg.hadImage || msg.hadAudio || msg.hadDocument || msg.hadVideo) {
         mediaDone++;
         post('progress', { phase: 'download', done: mediaDone, total: mediaTotal });
         try {
-          const blob = await withTimeout(WPP.chat.downloadMedia(id), 60000, 'download');
+          // vídeos podem ser grandes → timeout maior
+          const blob = await withTimeout(WPP.chat.downloadMedia(id), 120000, 'download');
           const dataUrl = blob ? await blobToDataUrl(blob) : null;
           if (msg.hadImage) msg.imageDataUrl = dataUrl;
           else if (msg.hadAudio) msg.audioDataUrl = dataUrl;
-          else msg.documentDataUrl = dataUrl;
+          else if (msg.hadDocument) msg.documentDataUrl = dataUrl;
+          else msg.videoDataUrl = dataUrl;
         } catch (err) {
           // mantém had*=true sem dataUrl — o md marca como não exportado,
           // e o loop segue para a próxima mídia em vez de congelar
@@ -147,7 +152,8 @@
         }
       }
 
-      if (!msg.text && !msg.hadImage && !msg.hadAudio && !msg.hadDocument) continue;
+      if (!msg.text && !msg.hadImage && !msg.hadAudio && !msg.hadDocument && !msg.hadVideo)
+        continue;
       messages.push(msg);
     }
 

@@ -26,6 +26,11 @@ function mimeToExt(mimeType) {
     'audio/wav': 'wav',
     'audio/x-wav': 'wav',
     'audio/webm': 'webm',
+    'video/mp4': 'mp4',
+    'video/3gpp': '3gp',
+    'video/quicktime': 'mov',
+    'video/x-matroska': 'mkv',
+    'video/webm': 'webm',
   };
   return map[mimeType] || 'bin';
 }
@@ -224,6 +229,18 @@ async function handleExport({ contactName, messages }) {
     msg.documentSaved = safeName;
     await downloadDataUrl(msg.documentDataUrl, `${folderName}/arquivos/${safeName}`);
     delete msg.documentDataUrl;
+  }
+
+  // Vídeos → /videos
+  let videoCounter = 0;
+  for (const msg of messages) {
+    if (!msg.videoDataUrl) continue;
+    videoCounter++;
+    const ext = mimeToExt(dataUrlMime(msg.videoDataUrl));
+    const vext = ext === 'bin' ? 'mp4' : ext;
+    msg.videoFilename = `video_${String(videoCounter).padStart(3, '0')}.${vext}`;
+    await downloadDataUrl(msg.videoDataUrl, `${folderName}/videos/${msg.videoFilename}`);
+    delete msg.videoDataUrl;
   }
 
   const exportedAt = formatDate(exportDate);
