@@ -8,6 +8,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     window.postMessage({ [TAG]: 'capture', maxMessages: msg.maxMessages }, window.origin);
     sendResponse({ ok: true }); // confirma que o relay existe nesta aba
   }
+  if (msg.action === 'wmd-health') {
+    window.postMessage({ [TAG]: 'health-check' }, window.origin);
+    sendResponse({ ok: true }); // resposta real chega depois via runtime {action:'health'}
+  }
 });
 
 window.addEventListener('message', (e) => {
@@ -24,6 +28,13 @@ window.addEventListener('message', (e) => {
       phase: e.data.phase,
       done: e.data.done,
       total: e.data.total,
+    });
+  } else if (kind === 'health') {
+    chrome.runtime.sendMessage({
+      action: 'health',
+      waVersion: e.data.waVersion,
+      wppReady: e.data.wppReady,
+      modulesOk: e.data.modulesOk,
     });
   }
 });

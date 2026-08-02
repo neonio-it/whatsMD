@@ -164,7 +164,8 @@ function notifyPopup(state, extra = {}) {
   persistStatus(obj);
 }
 
-async function handleExport({ contactName, messages }) {
+// waVersion/mediaFailed só vêm do caminho WPP (capture_main); o fallback DOM não os manda
+async function handleExport({ contactName, messages, waVersion = '', mediaFailed = 0 }) {
   notifyPopup('loading');
 
   const settings = await getSettings();
@@ -249,5 +250,16 @@ async function handleExport({ contactName, messages }) {
   const mdDataUrl = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(md);
   await downloadDataUrl(mdDataUrl, `${folderName}/conversa.md`);
 
-  notifyPopup('done', { filename: `${folderName}/conversa.md` });
+  if (mediaFailed > 0) {
+    // não atualiza lastGoodWaVersion — a versão atual do WhatsApp Web é suspeita
+    notifyPopup('done', {
+      filename: `${folderName}/conversa.md`,
+      warning: `${mediaFailed} mídia(s) não baixaram. O WhatsApp Web ${waVersion} pode ter ficado incompatível com o wa-js — se persistir, atualize vendor/wppconnect-wa.js.`,
+    });
+  } else {
+    // exportação limpa ⇒ o wa-js atual funciona nesta versão do WhatsApp Web;
+    // o popup compara com isso para avisar quando a versão mudar
+    if (waVersion) chrome.storage.local.set({ lastGoodWaVersion: waVersion });
+    notifyPopup('done', { filename: `${folderName}/conversa.md` });
+  }
 }

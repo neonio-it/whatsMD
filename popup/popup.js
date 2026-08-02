@@ -1,5 +1,6 @@
 const btn = document.getElementById('exportBtn');
 const statusEl = document.getElementById('status');
+const bannerEl = document.getElementById('banner');
 
 const DEFAULT_SETTINGS = {
   sttEnabled: true,
@@ -15,6 +16,37 @@ function setStatus(state, message) {
   statusEl.textContent = message;
 }
 
+function showBanner(kind, message) {
+  bannerEl.className = `banner ${kind}`;
+  bannerEl.textContent = message;
+}
+
+function hideBanner() {
+  bannerEl.className = 'banner hidden';
+}
+
+// saúde reportada pelo capture_main (via relay): avisa ANTES de exportar quando
+// (a) o wa-js já quebrou nesta versão do WhatsApp Web, ou (b) a versão mudou
+// desde a última exportação limpa — sinal de que o wa-js PODE ter quebrado
+function applyHealth(h) {
+  if (h.wppReady && !h.modulesOk) {
+    showBanner(
+      'error',
+      `wa-js incompatível com o WhatsApp Web ${h.waVersion} — mídias não vão baixar. Atualize vendor/wppconnect-wa.js.`
+    );
+    return;
+  }
+  if (!h.waVersion) return;
+  chrome.storage.local.get({ lastGoodWaVersion: '' }, ({ lastGoodWaVersion }) => {
+    if (lastGoodWaVersion && lastGoodWaVersion !== h.waVersion) {
+      showBanner(
+        'warn',
+        `WhatsApp Web atualizou (${lastGoodWaVersion} → ${h.waVersion}) desde a última exportação OK. Se mídias falharem, atualize o wa-js.`
+      );
+    }
+  });
+}
+
 function setBar(frac) {
   $('progress').classList.remove('hidden');
   $('progressBar').style.width = `${Math.round(Math.min(1, Math.max(0, frac)) * 100)}%`;
@@ -26,7 +58,9 @@ function hideBar() {
 
 // render unificado do progresso — a fase de download ocupa os primeiros 10%,
 // a transcrição (o trabalho pesado, com progresso real) os 90% restantes.
-function applyStatus(msg) {
+// restored = status recuperado do storage ao reabrir o popup; nesse caso ele não pode
+// apagar o banner, porque o aviso de versão é informação mais nova que aquele status
+function applyStatus(msg, restored) {
   if (msg.state === 'loading') {
     btn.disabled = true;
     let fill = 0;
@@ -44,6 +78,9 @@ function applyStatus(msg) {
     btn.disabled = false;
     setBar(1);
     setStatus('done', `Salvo: ${msg.filename}`);
+    // exportou mas com mídias faltando → provável wa-js × WhatsApp Web
+    if (msg.warning) showBanner('warn', msg.warning);
+    else if (!restored) hideBanner(); // exportação limpa: aviso de versão deixou de valer
   } else if (msg.state === 'error') {
     btn.disabled = false;
     hideBar();
@@ -107,12 +144,20 @@ chrome.storage.local.get({ lastStatus: null }, ({ lastStatus }) => {
   if (!lastStatus) return;
   const age = Date.now() - (lastStatus.t || 0);
   if (age > 15 * 60 * 1000) return; // status velho não interessa
-  applyStatus(lastStatus);
+  applyStatus(lastStatus, true);
 });
 
 // ---- Status vindo do background ----
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'status') applyStatus(msg);
+  if (msg.action === 'health') applyHealth(msg);
+});
+
+// ao abrir, pergunta a saúde à aba do WhatsApp (resposta assíncrona via 'health' acima);
+// sem relay na aba (ou aba errada) o callback só engole o lastError
+chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+  if (!tab || !tab.url || !tab.url.includes('web.whatsapp.com')) return;
+  chrome.tabs.sendMessage(tab.id, { action: 'wmd-health' }, () => void chrome.runtime.lastError);
 });
 
 btn.addEventListener('click', async () => {

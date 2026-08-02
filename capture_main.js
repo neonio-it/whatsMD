@@ -35,6 +35,17 @@
     return false;
   }
 
+  // MsgStore/ChatStore são o que getMessages/downloadMedia usam por baixo — quando o
+  // WhatsApp Web atualiza e o wa-js fica incompatível, eles somem (visto na 2.3000.1044302058)
+  function healthInfo() {
+    const wa = (window.WPP && window.WPP.whatsapp) || {};
+    return {
+      waVersion: (window.Debug && window.Debug.VERSION) || '',
+      wppReady: !!(window.WPP && window.WPP.isReady),
+      modulesOk: !!(wa.MsgStore && wa.ChatStore),
+    };
+  }
+
   const pad = (n) => String(n).padStart(2, '0');
 
   function fmtTime(epochSec) {
@@ -59,6 +70,14 @@
       return;
     }
     const WPP = window.WPP;
+
+    const health = healthInfo();
+    if (!health.modulesOk) {
+      post('error', {
+        message: `wa-js incompatível com o WhatsApp Web ${health.waVersion} — módulos internos não resolveram e as mídias não vão baixar. Atualize vendor/wppconnect-wa.js (@wppconnect/wa-js no npm).`,
+      });
+      return;
+    }
 
     const chat = WPP.chat.getActiveChat();
     if (!chat) {
@@ -85,6 +104,7 @@
       ['ptt', 'audio', 'image', 'document', 'video'].includes(m.type)
     ).length;
     let mediaDone = 0;
+    let mediaFailed = 0;
 
     const messages = [];
     for (const m of raw) {
@@ -141,6 +161,7 @@
           // vídeos podem ser grandes → timeout maior
           const blob = await withTimeout(WPP.chat.downloadMedia(id), 120000, 'download');
           const dataUrl = blob ? await blobToDataUrl(blob) : null;
+          if (!dataUrl) mediaFailed++;
           if (msg.hadImage) msg.imageDataUrl = dataUrl;
           else if (msg.hadAudio) msg.audioDataUrl = dataUrl;
           else if (msg.hadDocument) msg.documentDataUrl = dataUrl;
@@ -148,6 +169,7 @@
         } catch (err) {
           // mantém had*=true sem dataUrl — o md marca como não exportado,
           // e o loop segue para a próxima mídia em vez de congelar
+          mediaFailed++;
           console.warn('[WhatsMD] downloadMedia falhou:', id, err);
         }
       }
@@ -157,7 +179,7 @@
       messages.push(msg);
     }
 
-    post('result', { data: { contactName, messages } });
+    post('result', { data: { contactName, messages, waVersion: health.waVersion, mediaFailed } });
   }
 
   window.addEventListener('message', (e) => {
@@ -165,5 +187,12 @@
     capture(e.data.maxMessages || 100).catch((err) =>
       post('error', { message: `Falha na captura: ${err.message}` })
     );
+  });
+
+  // popup pergunta a saúde ao abrir (via relay) → responde versão do WhatsApp Web
+  // e se os módulos do wa-js ainda resolvem nela
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data || e.data[TAG] !== 'health-check') return;
+    post('health', healthInfo());
   });
 })();

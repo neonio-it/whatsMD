@@ -81,6 +81,28 @@ button:disabled {
   line-height: 1.4;
 }
 
+.banner {
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.banner.hidden {
+  display: none;
+}
+
+.banner.warn {
+  background: #33290d;
+  color: #f5c518;
+}
+
+.banner.error {
+  background: #2d1515;
+  color: #f15c6d;
+}
+
 .status.hidden {
   display: none;
 }
