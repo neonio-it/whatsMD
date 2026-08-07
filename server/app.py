@@ -57,6 +57,12 @@ def _save_temp(data: bytes) -> str:
     return f.name
 
 
+def _lang_or_none(language: str):
+    """'auto' (ou vazio) -> None: o faster-whisper detecta o idioma por áudio."""
+    lang = (language or "").strip().lower()
+    return None if lang in ("", "auto") else lang
+
+
 @app.post("/transcribe-stream")
 async def transcribe_stream(
     audio_file: UploadFile = File(...), language: str = Query("pt")
@@ -67,7 +73,7 @@ async def transcribe_stream(
     def gen():
         try:
             segments, info = get_model().transcribe(
-                path, language=language, vad_filter=True
+                path, language=_lang_or_none(language), vad_filter=True
             )
             total = getattr(info, "duration", 0) or 0
             parts = []
@@ -99,7 +105,9 @@ async def asr(audio_file: UploadFile = File(...), language: str = Query("pt")):
     data = await audio_file.read()
     path = _save_temp(data)
     try:
-        segments, _ = get_model().transcribe(path, language=language, vad_filter=True)
+        segments, _ = get_model().transcribe(
+            path, language=_lang_or_none(language), vad_filter=True
+        )
         return PlainTextResponse("".join(s.text for s in segments).strip())
     finally:
         try:

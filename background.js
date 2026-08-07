@@ -144,7 +144,8 @@ chrome.runtime.onMessage.addListener((message) => {
     });
   }
   if (message.action === 'error') {
-    notifyPopup('error', { message: message.message });
+    // fallbackDom: wa-js quebrado — o popup usa isso para cair no scraping DOM
+    notifyPopup('error', { message: message.message, fallbackDom: !!message.fallbackDom });
   }
   // progresso vindo do relay (fase de download) — persiste também
   if (message.action === 'status' && message.state === 'loading' && message.phase) {
@@ -165,12 +166,14 @@ function notifyPopup(state, extra = {}) {
 }
 
 // waVersion/mediaFailed só vêm do caminho WPP (capture_main); o fallback DOM não os manda
-async function handleExport({ contactName, messages, waVersion = '', mediaFailed = 0 }) {
+async function handleExport({ contactName, messages, waVersion = '', mediaFailed = 0, audioOnly = false }) {
   notifyPopup('loading');
 
   const settings = await getSettings();
+  // o botão do modo áudio é "baixar e transcrever" — transcreve mesmo com o toggle desligado
+  if (audioOnly) settings.sttEnabled = true;
   const exportDate = new Date();
-  const folderName = `WhatsMD/${safeFilename(contactName)}_${formatDateForFolder(exportDate)}`;
+  const folderName = `WhatsMD/${safeFilename(contactName)}${audioOnly ? '_audios' : ''}_${formatDateForFolder(exportDate)}`;
 
   // Imagens
   let imageCounter = 0;
@@ -247,19 +250,20 @@ async function handleExport({ contactName, messages, waVersion = '', mediaFailed
   const exportedAt = formatDate(exportDate);
   const md = buildMarkdown(messages, { contactName, exportedAt, total: messages.length });
 
+  const mdName = audioOnly ? 'transcricoes.md' : 'conversa.md';
   const mdDataUrl = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(md);
-  await downloadDataUrl(mdDataUrl, `${folderName}/conversa.md`);
+  await downloadDataUrl(mdDataUrl, `${folderName}/${mdName}`);
 
   if (mediaFailed > 0) {
     // não atualiza lastGoodWaVersion — a versão atual do WhatsApp Web é suspeita
     notifyPopup('done', {
-      filename: `${folderName}/conversa.md`,
+      filename: `${folderName}/${mdName}`,
       warning: `${mediaFailed} mídia(s) não baixaram. O WhatsApp Web ${waVersion} pode ter ficado incompatível com o wa-js — se persistir, atualize vendor/wppconnect-wa.js.`,
     });
   } else {
     // exportação limpa ⇒ o wa-js atual funciona nesta versão do WhatsApp Web;
     // o popup compara com isso para avisar quando a versão mudar
     if (waVersion) chrome.storage.local.set({ lastGoodWaVersion: waVersion });
-    notifyPopup('done', { filename: `${folderName}/conversa.md` });
+    notifyPopup('done', { filename: `${folderName}/${mdName}` });
   }
 }

@@ -35,15 +35,35 @@
     return false;
   }
 
-  // MsgStore/ChatStore são o que getMessages/downloadMedia usam por baixo — quando o
-  // WhatsApp Web atualiza e o wa-js fica incompatível, eles somem (visto na 2.3000.1044302058)
+  // MsgStore/ChatStore são o que getMessages usa por baixo — quando o WhatsApp Web
+  // atualiza e o wa-js fica incompatível, eles somem (visto na 2.3000.1044302058).
+  // mediaOk sonda os módulos que downloadMedia usa (conferidos na 2.3000.1044725657):
+  // uma atualização pode quebrar só a parte de mídia mantendo a leitura de texto.
   function healthInfo() {
-    const wa = (window.WPP && window.WPP.whatsapp) || {};
+    const WPP = window.WPP || {};
+    const wa = WPP.whatsapp || {};
+    const modulesOk = !!(wa.MsgStore && wa.ChatStore);
+    const mediaOk =
+      modulesOk &&
+      typeof (WPP.chat && WPP.chat.downloadMedia) === 'function' &&
+      !!(wa.MediaBlobCache && wa.OpaqueData && wa.MediaPrep);
     return {
       waVersion: (window.Debug && window.Debug.VERSION) || '',
-      wppReady: !!(window.WPP && window.WPP.isReady),
-      modulesOk: !!(wa.MsgStore && wa.ChatStore),
+      wppReady: !!WPP.isReady,
+      modulesOk,
+      mediaOk,
     };
+  }
+
+  // isReady dispara antes de todos os módulos resolverem — dá uma folga antes de
+  // declarar o wa-js quebrado (evita falso negativo em máquina/conexão lenta)
+  async function waitModules(timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (healthInfo().modulesOk) return true;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
   }
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -71,13 +91,16 @@
     }
     const WPP = window.WPP;
 
-    const health = healthInfo();
-    if (!health.modulesOk) {
+    if (!(await waitModules(5000))) {
+      // wa-js quebrado de verdade — sinaliza para o popup cair no modo degradado
+      // (scraping DOM: texto e imagens visíveis) em vez de recusar a exportação
       post('error', {
-        message: `wa-js incompatível com o WhatsApp Web ${health.waVersion} — módulos internos não resolveram e as mídias não vão baixar. Atualize vendor/wppconnect-wa.js (@wppconnect/wa-js no npm).`,
+        message: `wa-js incompatível com o WhatsApp Web ${healthInfo().waVersion} — módulos internos não resolveram. Atualize vendor/wppconnect-wa.js (@wppconnect/wa-js no npm).`,
+        fallbackDom: true,
       });
       return;
     }
+    const health = healthInfo();
 
     const chat = WPP.chat.getActiveChat();
     if (!chat) {
@@ -105,6 +128,13 @@
     ).length;
     let mediaDone = 0;
     let mediaFailed = 0;
+
+    // Disjuntor: se os módulos de mídia já não resolvem, ou se os downloads falham
+    // em sequência, para de tentar — cada tentativa quebrada pode segurar até 120s,
+    // e o texto exporta do mesmo jeito (as mídias saem como [não exportada] no md)
+    let skipDownloads = !health.mediaOk;
+    let consecutiveFails = 0;
+    const MAX_CONSECUTIVE_FAILS = 3;
 
     const messages = [];
     for (const m of raw) {
@@ -157,20 +187,32 @@
       if (msg.hadImage || msg.hadAudio || msg.hadDocument || msg.hadVideo) {
         mediaDone++;
         post('progress', { phase: 'download', done: mediaDone, total: mediaTotal });
-        try {
-          // vídeos podem ser grandes → timeout maior
-          const blob = await withTimeout(WPP.chat.downloadMedia(id), 120000, 'download');
-          const dataUrl = blob ? await blobToDataUrl(blob) : null;
-          if (!dataUrl) mediaFailed++;
-          if (msg.hadImage) msg.imageDataUrl = dataUrl;
-          else if (msg.hadAudio) msg.audioDataUrl = dataUrl;
-          else if (msg.hadDocument) msg.documentDataUrl = dataUrl;
-          else msg.videoDataUrl = dataUrl;
-        } catch (err) {
-          // mantém had*=true sem dataUrl — o md marca como não exportado,
-          // e o loop segue para a próxima mídia em vez de congelar
+        if (skipDownloads) {
           mediaFailed++;
-          console.warn('[WhatsMD] downloadMedia falhou:', id, err);
+        } else {
+          try {
+            // vídeos podem ser grandes → timeout maior
+            const blob = await withTimeout(WPP.chat.downloadMedia(id), 120000, 'download');
+            const dataUrl = blob ? await blobToDataUrl(blob) : null;
+            if (!dataUrl) mediaFailed++;
+            if (msg.hadImage) msg.imageDataUrl = dataUrl;
+            else if (msg.hadAudio) msg.audioDataUrl = dataUrl;
+            else if (msg.hadDocument) msg.documentDataUrl = dataUrl;
+            else msg.videoDataUrl = dataUrl;
+            consecutiveFails = dataUrl ? 0 : consecutiveFails + 1;
+          } catch (err) {
+            // mantém had*=true sem dataUrl — o md marca como não exportado,
+            // e o loop segue para a próxima mídia em vez de congelar
+            mediaFailed++;
+            consecutiveFails++;
+            console.warn('[WhatsMD] downloadMedia falhou:', id, err);
+          }
+          if (consecutiveFails >= MAX_CONSECUTIVE_FAILS) {
+            skipDownloads = true;
+            console.warn(
+              `[WhatsMD] ${MAX_CONSECUTIVE_FAILS} downloads seguidos falharam — pulando as mídias restantes (provável wa-js × WhatsApp Web)`
+            );
+          }
         }
       }
 
@@ -182,11 +224,113 @@
     post('result', { data: { contactName, messages, waVersion: health.waVersion, mediaFailed } });
   }
 
+  // Só os últimos N áudios: baixa e transcreve sem exportar o resto da conversa.
+  // Não tem modo degradado — áudio só sai pelos módulos internos (DOM não expõe os blobs).
+  async function captureAudios(audioCount) {
+    if (!(await waitReady(10000))) {
+      post('error', { message: 'WhatsApp ainda carregando (WPP não pronto). Recarregue a página e tente de novo.' });
+      return;
+    }
+    const WPP = window.WPP;
+
+    if (!(await waitModules(5000))) {
+      post('error', {
+        message: `wa-js incompatível com o WhatsApp Web ${healthInfo().waVersion} — áudios só saem pelos módulos internos. Atualize vendor/wppconnect-wa.js.`,
+      });
+      return;
+    }
+    const health = healthInfo();
+    if (!health.mediaOk) {
+      post('error', {
+        message: `Módulos de mídia quebrados no WhatsApp Web ${health.waVersion} — não dá para baixar áudios. Atualize vendor/wppconnect-wa.js.`,
+      });
+      return;
+    }
+
+    const chat = WPP.chat.getActiveChat();
+    if (!chat) {
+      post('error', { message: 'Selecione uma conversa.' });
+      return;
+    }
+    const chatId = (chat.id && chat.id._serialized) || String(chat.id);
+    const contactName =
+      chat.formattedTitle || chat.name || (chat.contact && chat.contact.name) || 'Conversa';
+
+    // busca adaptativa: os N áudios podem estar espalhados entre muitas mensagens
+    // de texto — dobra a janela até achá-los, até o teto (conversas enormes)
+    let fetchCount = Math.max(100, audioCount * 10);
+    let audios = [];
+    for (;;) {
+      let raw;
+      try {
+        raw = await WPP.chat.getMessages(chatId, { count: fetchCount });
+      } catch (err) {
+        post('error', { message: `Falha ao ler mensagens: ${err.message}` });
+        return;
+      }
+      audios = raw
+        .filter((m) => m && (m.type === 'ptt' || m.type === 'audio'))
+        .sort((a, b) => (a.t || 0) - (b.t || 0));
+      // raw menor que o pedido = chegou no início da conversa, não há mais o que buscar
+      if (audios.length >= audioCount || raw.length < fetchCount || fetchCount >= 2000) break;
+      fetchCount = Math.min(2000, fetchCount * 2);
+    }
+    audios = audios.slice(-audioCount);
+    if (!audios.length) {
+      post('error', { message: 'Nenhum áudio encontrado na conversa (janela de busca: últimas ' + fetchCount + ' mensagens).' });
+      return;
+    }
+
+    let mediaFailed = 0;
+    let consecutiveFails = 0;
+    let skipDownloads = false;
+    const messages = [];
+    let done = 0;
+    for (const m of audios) {
+      const id = (m.id && m.id._serialized) || String(m.id || '');
+      const fromMe = m.id && typeof m.id.fromMe === 'boolean' ? m.id.fromMe : !!m.fromMe;
+      const msg = {
+        sender: fromMe
+          ? 'Você'
+          : m.notifyName || (m.senderObj && (m.senderObj.formattedName || m.senderObj.pushname)) || contactName,
+        time: m.t ? fmtTime(m.t) : '',
+        date: m.t ? fmtDate(m.t) : '',
+        text: '',
+        hadAudio: true,
+        audioDataUrl: null,
+        audioSecs: Math.round(m.duration || 0),
+      };
+      done++;
+      post('progress', { phase: 'download', done, total: audios.length });
+      if (skipDownloads) {
+        mediaFailed++;
+      } else {
+        try {
+          const blob = await withTimeout(WPP.chat.downloadMedia(id), 120000, 'download');
+          msg.audioDataUrl = blob ? await blobToDataUrl(blob) : null;
+          if (!msg.audioDataUrl) mediaFailed++;
+          consecutiveFails = msg.audioDataUrl ? 0 : consecutiveFails + 1;
+        } catch (err) {
+          mediaFailed++;
+          consecutiveFails++;
+          console.warn('[WhatsMD] downloadMedia falhou:', id, err);
+        }
+        if (consecutiveFails >= 3) skipDownloads = true; // mesmo disjuntor da captura completa
+      }
+      messages.push(msg);
+    }
+
+    post('result', {
+      data: { contactName, messages, waVersion: health.waVersion, mediaFailed, audioOnly: true },
+    });
+  }
+
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data[TAG] !== 'capture') return;
-    capture(e.data.maxMessages || 100).catch((err) =>
-      post('error', { message: `Falha na captura: ${err.message}` })
-    );
+    const run = e.data.audioOnly
+      ? captureAudios(Math.max(1, e.data.audioCount || 10))
+      : capture(e.data.maxMessages || 100);
+    run.catch((err) => post('error', { message: `Falha na captura: ${err.message}` }));
   });
 
   // popup pergunta a saúde ao abrir (via relay) → responde versão do WhatsApp Web

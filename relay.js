@@ -5,7 +5,15 @@ const TAG = '__whatsmd';
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'wmd-capture') {
-    window.postMessage({ [TAG]: 'capture', maxMessages: msg.maxMessages }, window.origin);
+    window.postMessage(
+      {
+        [TAG]: 'capture',
+        maxMessages: msg.maxMessages,
+        audioOnly: !!msg.audioOnly, // modo "só os últimos N áudios"
+        audioCount: msg.audioCount,
+      },
+      window.origin
+    );
     sendResponse({ ok: true }); // confirma que o relay existe nesta aba
   }
   if (msg.action === 'wmd-health') {
@@ -20,7 +28,11 @@ window.addEventListener('message', (e) => {
   if (kind === 'result') {
     chrome.runtime.sendMessage({ action: 'export', data: e.data.data });
   } else if (kind === 'error') {
-    chrome.runtime.sendMessage({ action: 'error', message: e.data.message });
+    chrome.runtime.sendMessage({
+      action: 'error',
+      message: e.data.message,
+      fallbackDom: !!e.data.fallbackDom, // wa-js quebrado → popup cai no scraping DOM
+    });
   } else if (kind === 'progress') {
     chrome.runtime.sendMessage({
       action: 'status',
@@ -35,6 +47,7 @@ window.addEventListener('message', (e) => {
       waVersion: e.data.waVersion,
       wppReady: e.data.wppReady,
       modulesOk: e.data.modulesOk,
+      mediaOk: e.data.mediaOk,
     });
   }
 });
