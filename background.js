@@ -165,8 +165,22 @@ function notifyPopup(state, extra = {}) {
   persistStatus(obj);
 }
 
+// O Chrome mata o service worker MV3 após ~30s sem chamadas de API de extensão —
+// e fetch pendurado NÃO conta como atividade. O streaming do Whisper fica 35s+ sem
+// emitir nada (upload + decode + VAD + primeira janela de 30s; modelo frio pós-deploy
+// é pior), então a exportação morria no meio com a barra congelada. Cutucar uma API
+// trivial a cada 20s reseta o timer de idle e mantém o worker vivo até o fim.
+async function handleExport(data) {
+  const keepalive = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
+  try {
+    return await runExport(data);
+  } finally {
+    clearInterval(keepalive);
+  }
+}
+
 // waVersion/mediaFailed só vêm do caminho WPP (capture_main); o fallback DOM não os manda
-async function handleExport({ contactName, messages, waVersion = '', mediaFailed = 0, audioOnly = false }) {
+async function runExport({ contactName, messages, waVersion = '', mediaFailed = 0, audioOnly = false }) {
   notifyPopup('loading');
 
   const settings = await getSettings();
@@ -210,13 +224,17 @@ async function handleExport({ contactName, messages, waVersion = '', mediaFailed
         notifyPopup('loading', { phase: 'stt', progress: overall, done, total: audioMsgs.length });
       };
       report(0);
+      // o pczin transcreve a ~1,25x o tempo real do áudio (medido 07/08/2026) —
+      // 8 min fixos estouravam para áudios >6,5 min; escala pela duração,
+      // com folga para modelo frio e CPU disputada
+      const timeoutMs = Math.max(8 * 60 * 1000, curSecs * 3000 + 60000);
       try {
-        const t = await transcribeStream(msg.audioDataUrl, settings, report, 8 * 60 * 1000);
+        const t = await transcribeStream(msg.audioDataUrl, settings, report, timeoutMs);
         msg.transcript = t || '';
         if (!t) msg.transcriptError = 'vazio';
       } catch (err) {
         console.error('Transcrição falhou:', err);
-        msg.transcriptError = err.name === 'AbortError' ? 'tempo esgotado (áudio muito longo)' : err.message;
+        msg.transcriptError = err.name === 'AbortError' ? 'tempo esgotado na transcrição' : err.message;
       }
       completedSecs += curSecs;
       report(0); // completedSecs já inclui este áudio → fecha a fatia dele

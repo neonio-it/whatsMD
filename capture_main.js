@@ -114,7 +114,8 @@
 
     let raw;
     try {
-      raw = await WPP.chat.getMessages(chatId, { count: maxMessages });
+      // sem timeout, um getMessages pendurado (wa-js × WhatsApp Web) travava sem erro
+      raw = await withTimeout(WPP.chat.getMessages(chatId, { count: maxMessages }), 90000, 'getMessages');
     } catch (err) {
       post('error', { message: `Falha ao ler mensagens: ${err.message}` });
       return;
@@ -263,7 +264,8 @@
     for (;;) {
       let raw;
       try {
-        raw = await WPP.chat.getMessages(chatId, { count: fetchCount });
+        // a janela adaptativa chega a 2000 msgs — timeout generoso, mas nunca infinito
+        raw = await withTimeout(WPP.chat.getMessages(chatId, { count: fetchCount }), 90000, 'getMessages');
       } catch (err) {
         post('error', { message: `Falha ao ler mensagens: ${err.message}` });
         return;
